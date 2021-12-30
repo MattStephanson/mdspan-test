@@ -1,6 +1,7 @@
 #include "CppUnitTest.h"
 #include "mdspan.h"
 #include <type_traits>
+#include <vector>
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 using namespace std;
@@ -138,6 +139,44 @@ namespace test {
         }
     };
 
+    template <class Mapping, enable_if_t<Mapping::extents_type::rank() == 2, int> = 0>
+    void TestMapping(const Mapping& map) {
+        array<size_t, Mapping::extents_type::rank()> s;
+        const auto& e = map.extents();
+        size_t num_entries = 1;
+        for (size_t i = 0; i < Mapping::extents_type::rank(); ++i) {
+            num_entries *= e.extent(i);
+            s[i] = map.stride(i);
+        }
+
+        vector<size_t> indices;
+        indices.reserve(num_entries);
+
+        for (size_t i = 0; i < e.extent(0); ++i) {
+            for (size_t j = 0; j < e.extent(1); ++j) {
+                const auto idx = i * s[0] + j * s[1];
+                Assert::IsTrue(map(i, j) == idx);
+                indices.push_back(idx);
+            }
+        }
+
+        bool is_unique = true;
+        bool is_cont = true;
+        sort(indices.begin(), indices.end());
+        for (size_t i = 1; i < indices.size(); ++i) {
+            const auto d = indices[i] - indices[i - 1];
+            if (d == 0) {
+                is_unique = false;
+            } else if (d != 1) {
+                is_cont = false;
+            }
+        }
+
+        Assert::IsTrue(map.is_unique() == is_unique);
+        Assert::IsTrue(map.is_contiguous() == is_cont);
+        Assert::IsTrue(map.required_span_size() == indices.back() + 1);
+    }
+
     TEST_CLASS(layout_left_tests){
     public:
         TEST_METHOD(traits) {
@@ -203,7 +242,7 @@ namespace test {
             static_assert(m2.extents() == e2);
         }
 
-         template <class Extents>
+        template <class Extents>
         void assign_helper(const Extents& e) {
             const layout_left::mapping m1{e};
             layout_left::mapping<Extents> m2;
@@ -218,46 +257,17 @@ namespace test {
             assign_helper(extents<dynamic_extent, dynamic_extent>{17, 19});
         }
 
-        TEST_METHOD(indexing_static) {
-            constexpr layout_left::mapping<extents<2, 3>> map{};
-            static_assert(map(0, 0) == 0);
-            static_assert(map(1, 0) == 1);
-            static_assert(map(0, 1) == 2);
-            static_assert(map(1, 1) == 3);
-            static_assert(map(0, 2) == 4);
-            static_assert(map(1, 2) == 5);
-            static_assert(map.required_span_size() == 6);
+        TEST_METHOD(strides) {
+            using E = extents<2, 3, 5, 7>;
+            layout_left::mapping<E> map;
+            static_assert(map.stride(0) == 1);
+            static_assert(map.stride(1) == 2);
+            static_assert(map.stride(2) == 6);
+            static_assert(map.stride(3) == 30);
         }
 
-        TEST_METHOD(indexing_dynamic) {
-            constexpr layout_left::mapping map{extents<dynamic_extent, dynamic_extent>{2, 3}};
-            static_assert(map(0, 0) == 0);
-            static_assert(map(1, 0) == 1);
-            static_assert(map(0, 1) == 2);
-            static_assert(map(1, 1) == 3);
-            static_assert(map(0, 2) == 4);
-            static_assert(map(1, 2) == 5);
-            static_assert(map.required_span_size() == 6);
-        }
-
-        TEST_METHOD(indexing_mixed) {
-            constexpr layout_left::mapping map1{extents<dynamic_extent, 3>{2}};
-            static_assert(map1(0, 0) == 0);
-            static_assert(map1(1, 0) == 1);
-            static_assert(map1(0, 1) == 2);
-            static_assert(map1(1, 1) == 3);
-            static_assert(map1(0, 2) == 4);
-            static_assert(map1(1, 2) == 5);
-            static_assert(map1.required_span_size() == 6);
-
-            constexpr layout_left::mapping map2{extents<2, dynamic_extent>{3}};
-            static_assert(map2(0, 0) == 0);
-            static_assert(map2(1, 0) == 1);
-            static_assert(map2(0, 1) == 2);
-            static_assert(map2(1, 1) == 3);
-            static_assert(map2(0, 2) == 4);
-            static_assert(map2(1, 2) == 5);
-            static_assert(map2.required_span_size() == 6);
+        TEST_METHOD(indexing) {
+            TestMapping(layout_left::mapping<extents<2, 3>>{});
         }
     };
 
@@ -341,48 +351,190 @@ namespace test {
         assign_helper(extents<dynamic_extent, dynamic_extent>{17, 19});
     }
 
+    TEST_METHOD(strides) {
+        using E = extents<2, 3, 5, 7>;
+        layout_right::mapping<E> map;
+        static_assert(map.stride(0) == 105);
+        static_assert(map.stride(1) == 35);
+        static_assert(map.stride(2) == 7);
+        static_assert(map.stride(3) == 1);
+    }
+
     TEST_METHOD(indexing_static) {
-        constexpr layout_right::mapping<extents<2, 3>> map{};
-        static_assert(map(0, 0) == 0);
-        static_assert(map(0, 1) == 1);
-        static_assert(map(0, 2) == 2);
-        static_assert(map(1, 0) == 3);
-        static_assert(map(1, 1) == 4);
-        static_assert(map(1, 2) == 5);
-        static_assert(map.required_span_size() == 6);
+        TestMapping(layout_right::mapping<extents<2, 3>>{});
     }
+    };
 
-    TEST_METHOD(indexing_dynamic) {
-        constexpr layout_right::mapping map{extents<dynamic_extent, dynamic_extent>{2, 3}};
-        static_assert(map(0, 0) == 0);
-        static_assert(map(0, 1) == 1);
-        static_assert(map(0, 2) == 2);
-        static_assert(map(1, 0) == 3);
-        static_assert(map(1, 1) == 4);
-        static_assert(map(1, 2) == 5);
-        static_assert(map.required_span_size() == 6);
-    }
 
-    TEST_METHOD(indexing_mixed) {
-        constexpr layout_right::mapping map1{extents<dynamic_extent, 3>{2}};
-        static_assert(map1(0, 0) == 0);
-        static_assert(map1(0, 1) == 1);
-        static_assert(map1(0, 2) == 2);
-        static_assert(map1(1, 0) == 3);
-        static_assert(map1(1, 1) == 4);
-        static_assert(map1(1, 2) == 5);
-        static_assert(map1.required_span_size() == 6);
+    TEST_CLASS(layout_stride_tests) {
+    public:
+        TEST_METHOD(traits) {
+            static_assert(is_semiregular_trivial_nothrow_v<layout_stride::mapping<extents<2, 3>>>);
+            static_assert(is_semiregular_trivial_nothrow_v<layout_stride::mapping<extents<dynamic_extent, 3>>>);
+            static_assert(is_semiregular_trivial_nothrow_v<layout_stride::mapping<extents<2, dynamic_extent>>>);
+            static_assert(is_semiregular_trivial_nothrow_v<layout_stride::mapping<extents<dynamic_extent, dynamic_extent>>>);
+        }
 
-        constexpr layout_right::mapping map2{extents<2, dynamic_extent>{3}};
-        static_assert(map2(0, 0) == 0);
-        static_assert(map2(0, 1) == 1);
-        static_assert(map2(0, 2) == 2);
-        static_assert(map2(1, 0) == 3);
-        static_assert(map2(1, 1) == 4);
-        static_assert(map2(1, 2) == 5);
-        static_assert(map2.required_span_size() == 6);
-    }
-    }
-    ;
+        TEST_METHOD(properties) {
+            constexpr layout_stride::mapping<extents<2, 3>> map{};
+            static_assert(map.is_unique() == true);
+            static_assert(map.is_strided() == true);
 
+            static_assert(decltype(map)::is_always_unique() == true);
+            static_assert(decltype(map)::is_always_contiguous() == false);
+            static_assert(decltype(map)::is_always_strided() == true);
+        }
+
+        TEST_METHOD(extents_ctor) {
+            constexpr extents<2, 3> e1;
+            constexpr array<size_t, 2> s1{ 1,2 };
+
+            constexpr layout_stride::mapping m1{ e1, s1 };
+            static_assert(m1.extents() == e1);
+            static_assert(m1.strides() == s1);
+
+            constexpr extents<5, dynamic_extent> e2{ 7 };
+            constexpr array<size_t, 2> s2{ 7,1 };
+
+            constexpr layout_stride::mapping m2{ e2, s2 };
+            static_assert(m2.extents() == e2);
+            static_assert(m2.strides() == s2);
+        }
+
+        template <class Extents>
+        void copy_ctor_helper(const Extents& e) {
+            const layout_stride::mapping<Extents> m1{layout_right::mapping<Extents>{e}};
+            const layout_stride::mapping<Extents> m2{ m1 };
+            Assert::IsTrue(m1 == m2);
+        }
+
+        TEST_METHOD(copy_ctor) {
+            copy_ctor_helper(extents<2, 3>{});
+            copy_ctor_helper(extents<5, dynamic_extent>{7});
+            copy_ctor_helper(extents<dynamic_extent, 13>{11});
+            copy_ctor_helper(extents<dynamic_extent, dynamic_extent>{17, 19});
+        }
+
+        TEST_METHOD(ctor_other_extents) {
+            constexpr extents<2, 3> e1;
+            constexpr extents<2, dynamic_extent> e2{ 3 };
+            constexpr array< size_t, 2> s{ 3, 1 };
+
+            constexpr layout_stride::mapping<decltype(e1)> m1(e1, s);
+            constexpr layout_stride::mapping<decltype(e2)> m2(m1);
+
+            static_assert(m2.extents() == e1);
+            static_assert(m2.strides() == s);
+        }
+
+        template <class LayoutMapping>
+        void other_mapping_helper() {
+            constexpr LayoutMapping other;
+            constexpr layout_stride::mapping<LayoutMapping::extents_type> map{ other };
+            static_assert(map.extents() == other.extents());
+            for (size_t i = 0; i < LayoutMapping::extents_type::rank(); ++i) {
+                Assert::IsTrue(map.stride(i) == other.stride(i));
+            }
+        }
+        TEST_METHOD(ctor_other_mapping) {
+            using E = extents<2, 3>;
+            other_mapping_helper<layout_left::mapping<E>>();
+            other_mapping_helper<layout_right::mapping<E>>();
+        }
+
+        template <class Extents>
+        void assign_helper(const Extents& e) {
+            const layout_stride::mapping<Extents> m1{layout_right::mapping<Extents>{e}};
+            layout_stride::mapping<Extents> m2;
+            m2 = m1;
+            Assert::IsTrue(m1 == m2);
+        }
+
+        TEST_METHOD(assign) {
+            assign_helper(extents<2, 3>{});
+            assign_helper(extents<5, dynamic_extent>{7});
+            assign_helper(extents<dynamic_extent, 13>{11});
+            assign_helper(extents<dynamic_extent, dynamic_extent>{17, 19});
+        }
+
+        TEST_METHOD(strides) {
+            using E = extents<3,5>;
+            constexpr array<size_t, 2> s{ 1, 3 };
+            constexpr layout_stride::mapping<E> map{ E{}, s };
+            static_assert(map.stride(0) == s[0]);
+            static_assert(map.stride(1) == s[1]);
+            static_assert(map.strides() == s);
+        }
+
+        TEST_METHOD(indexing_static) {
+            using E = extents<2, 3>;
+            TestMapping(layout_stride::mapping<E>{ E{}, array<size_t, 2>{1, 2} });
+            TestMapping(layout_stride::mapping<E>{ E{}, array<size_t, 2>{3, 1} });
+
+            // non-contiguous mappings
+            TestMapping(layout_stride::mapping<E>{ E{}, array<size_t, 2>{1, 3} });
+            TestMapping(layout_stride::mapping<E>{ E{}, array<size_t, 2>{4, 1} });
+            TestMapping(layout_stride::mapping<E>{ E{}, array<size_t, 2>{2, 3} });
+        }
+
+        TEST_METHOD(equality) {
+            using E = extents<2,3>;
+            constexpr layout_stride::mapping<E> map1{layout_right::mapping<E>{}};
+            constexpr layout_stride::mapping<E> map2{layout_right::mapping<E>{}};
+            static_assert(map1 == map2);
+
+            constexpr layout_stride::mapping<E> map3{layout_left::mapping<E>{}};
+            static_assert(map1 != map3);
+
+            using ED = extents<dynamic_extent, dynamic_extent>;
+            constexpr layout_stride::mapping<ED> map4{ED{2, 3}, map1.strides()};
+            static_assert(map1 == map4);
+        }
+    };
+
+    TEST_CLASS(assessor_tests) {
+    public :
+        TEST_METHOD(general)
+        {
+            default_accessor<double> a;
+            double arr[4] = {};
+            static_assert(a.offset(arr, 3) == &arr[3]);
+
+            a.access(arr, 2) = 42;
+            Assert::IsTrue(arr[2] == 42);
+
+            static_assert(is_constructible_v<default_accessor<const double>, default_accessor<double>>);
+            static_assert(!is_constructible_v<default_accessor<double>, default_accessor<const double>>);
+        }
+    };
+
+    TEST_CLASS(mdspan_tests) {
+    public:
+        TEST_METHOD(traits)
+        {
+            using M = mdspan<const int, extents<2,3>>;
+            static_assert(is_trivially_copyable_v<M> && is_default_constructible_v<M>
+                && is_copy_constructible_v<M> && is_move_constructible_v<M>
+                && is_copy_assignable_v<M> && is_move_assignable_v<M>);
+
+            static_assert(is_same_v<M::extents_type, extents<2,3>>);
+            static_assert(is_same_v<M::layout_type, layout_right>);
+            static_assert(is_same_v<M::accessor_type, default_accessor<const int>>);
+            static_assert(is_same_v<M::mapping_type, layout_right::mapping<extents<2, 3>>>);
+            static_assert(is_same_v<M::element_type, const int>);
+            static_assert(is_same_v<M::value_type, int>);
+            static_assert(is_same_v<M::size_type, size_t>);
+            static_assert(is_same_v<M::difference_type, ptrdiff_t>);
+            static_assert(is_same_v<M::pointer, const int*>);
+            static_assert(is_same_v<M::reference, const int&>);
+            }
+
+        TEST_METHOD(ctor_sizes)
+        {
+            int arr[6] = {};
+            mdspan<int, extents<2, dynamic_extent>> mds1(arr, 3);
+            Assert::IsTrue(mds1.data() == arr);
+            Assert::IsTrue(mds1.extents() == extents<2, 3>{});
+        }
+    };
 } // namespace mdspan
