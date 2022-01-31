@@ -23,6 +23,32 @@ namespace test {
             static_assert(is_semiregular_trivial_nothrow_v<extents<dynamic_extent, 3>>);
             static_assert(is_semiregular_trivial_nothrow_v<extents<2, dynamic_extent>>);
             static_assert(is_semiregular_trivial_nothrow_v<extents<dynamic_extent, dynamic_extent>>);
+
+            static_assert(is_same_v<dextents<1>, extents<dynamic_extent>>);
+            static_assert(is_same_v<dextents<2>, extents<dynamic_extent, dynamic_extent>>);
+        }
+
+        TEST_METHOD(rank) {
+            static_assert(extents<>::rank() == 0);
+            static_assert(extents<>::rank_dynamic() == 0);
+
+            static_assert(extents<2>::rank() == 1);
+            static_assert(extents<2>::rank_dynamic() == 0);
+            
+            static_assert(extents<dynamic_extent>::rank() == 1);
+            static_assert(extents<dynamic_extent>::rank_dynamic() == 1);
+
+            static_assert(extents<2, 3>::rank() == 2);
+            static_assert(extents<2, 3>::rank_dynamic() == 0);
+
+            static_assert(extents<2, dynamic_extent>::rank() == 2);
+            static_assert(extents<2, dynamic_extent>::rank_dynamic() == 1);
+
+            static_assert(extents<dynamic_extent, 3>::rank() == 2);
+            static_assert(extents<dynamic_extent, 3>::rank_dynamic() == 1);
+
+            static_assert(extents<dynamic_extent, dynamic_extent>::rank() == 2);
+            static_assert(extents<dynamic_extent, dynamic_extent>::rank_dynamic() == 2);
         }
 
         TEST_METHOD(static_extent) {
@@ -77,8 +103,10 @@ namespace test {
             static_assert(!is_constructible_v<extents<2, 3>, extents<2>>);
             static_assert(!is_constructible_v<extents<2, 3>, extents<3, 2>>);
 
+            using E = extents<2, 3>;
+
             extents<2, 3> e0{extents<2, 3>{}};
-            extents<2, 3> e1{extents<dynamic_extent, 3>{2u}};
+            E e1(extents<dynamic_extent, 3>(2u));
             extents<2, 3> e2{extents<2, dynamic_extent>{3u}};
             extents<2, 3> e3{extents<dynamic_extent, dynamic_extent>{2u, 3u}};
         }
@@ -267,6 +295,7 @@ namespace test {
         }
 
         TEST_METHOD(indexing) {
+            static_assert(layout_left::mapping<extents<>>{}() == 0);
             TestMapping(layout_left::mapping<extents<2, 3>>{});
         }
     };
@@ -508,6 +537,33 @@ namespace test {
         }
     };
 
+    namespace Pathological {
+
+        struct Empty {};
+
+        struct Extents {
+            explicit Extents(Empty) {}
+
+            template <size_t N>
+            explicit Extents(const array<Empty, N>&) {}
+        };
+
+        struct Layout {
+            template <class E>
+            struct mapping {
+                using extents_type = E;
+                using layout_type  = Layout;
+                mapping(Extents) {}
+            };
+        };
+
+        struct Accessor {
+            using pointer   = int*;
+            using reference = int&;
+            Accessor(int) {}
+        };
+    } // namespace Pathological
+
     TEST_CLASS(mdspan_tests) {
     public:
         TEST_METHOD(traits)
@@ -527,14 +583,146 @@ namespace test {
             static_assert(is_same_v<M::difference_type, ptrdiff_t>);
             static_assert(is_same_v<M::pointer, const int*>);
             static_assert(is_same_v<M::reference, const int&>);
-            }
+        }
 
         TEST_METHOD(ctor_sizes)
         {
             int arr[6] = {};
-            mdspan<int, extents<2, dynamic_extent>> mds1(arr, 3);
-            Assert::IsTrue(mds1.data() == arr);
-            Assert::IsTrue(mds1.extents() == extents<2, 3>{});
+            constexpr mdspan<int, extents<dynamic_extent, 3>> mds1(arr, 2);
+            static_assert(mds1.data() == arr);
+            static_assert(mds1.extents() == extents<2, 3>{});
+            static_assert(mds1.is_contiguous());
+
+            static_assert(!is_constructible_v<mdspan<int, Pathological::Extents, Pathological::Layout>,
+                int*, Pathological::Empty>); // Empty not convertible to size_type
+
+            static_assert(!is_constructible_v<mdspan<int, Pathological::Extents, Pathological::Layout>,
+                int*, int>); // Pathological::Extents not constructible from int
+
+            static_assert(!is_constructible_v<mdspan<int, extents<dynamic_extent>, Pathological::Layout>,
+                int*, int>); // Pathological::Layout not constructible from extents<dynamic_extent>
+
+            static_assert(!is_constructible_v < mdspan<int, extents<dynamic_extent>, layout_right, Pathological::Accessor>,
+                int*, int>); // Pathological::Accessor not default constructible
+        }
+
+        TEST_METHOD(ctor_array)
+        {
+            int arr[6] = {};
+            constexpr mdspan<int, extents<dynamic_extent, 3>> mds1(arr, array{2});
+            static_assert(mds1.data() == arr);
+            static_assert(mds1.extents() == extents<2, 3>{});
+
+            static_assert(!is_constructible_v<mdspan<int, Pathological::Extents, Pathological::Layout>,
+                int*, array<Pathological::Empty,1>>); // Empty not convertible to size_type
+
+            static_assert(!is_constructible_v<mdspan<int, Pathological::Extents, Pathological::Layout>,
+                int*, array<int,1>>); // Pathological::Extents not constructible from int
+
+            static_assert(!is_constructible_v<mdspan<int, extents<dynamic_extent>, Pathological::Layout>,
+                int*, array<int,1>>); // Pathological::Layout not constructible from extents<dynamic_extent>
+
+            static_assert(!is_constructible_v < mdspan<int, extents<dynamic_extent>, layout_right, Pathological::Accessor>,
+                int*, array<int,1>>); // Pathological::Accessor not default constructible
+        }
+
+        TEST_METHOD(ctor_extents)
+        {
+            int arr[6] = {};
+            constexpr mdspan<int, extents<dynamic_extent, 3>> mds1(arr, extents<dynamic_extent, 3>{2});
+            static_assert(mds1.data() == arr);
+            static_assert(mds1.extents() == extents<2, 3>{});
+
+            static_assert(!is_constructible_v<mdspan<int, extents<dynamic_extent>, Pathological::Layout>,
+                int*, extents<dynamic_extent>>); // Pathological::Layout not constructible from extents<dynamic_extent>
+
+            static_assert(!is_constructible_v < mdspan<int, extents<dynamic_extent>, layout_right, Pathological::Accessor>,
+                int*, extents<dynamic_extent>>); // Pathological::Accessor not default constructible
+        }
+
+        TEST_METHOD(ctor_mapping)
+        {
+            int arr[6] = {};
+            using E = extents<dynamic_extent, 3>;
+            constexpr layout_left::mapping<extents<2,3>> map(extents<2, 3>{});
+                
+            constexpr mdspan<int, E, layout_left> mds1(arr, map);
+            static_assert(mds1.data() == arr);
+            static_assert(mds1.extents() == extents<2, 3>{});
+            static_assert(mds1.mapping() == map);
+
+            static_assert(!is_constructible_v < mdspan<int, extents<dynamic_extent>, layout_right, Pathological::Accessor>,
+                int*, extents<dynamic_extent>>); // Pathological::Accessor not default constructible
+        }
+
+        template <class Type>
+        struct stateful_accessor {
+            using pointer   = Type*;
+            using reference = Type&;
+
+            constexpr stateful_accessor(int i_) : i(i_){};
+            int i = 0;
+        };
+
+        TEST_METHOD(ctor_accessor)
+        {
+            int arr[6] = {};
+            using E = extents<dynamic_extent, 3>;
+            constexpr layout_left::mapping<extents<2,3>> map(extents<2, 3>{});
+            constexpr stateful_accessor<int> acc(1);
+                
+            constexpr mdspan<int, E, layout_left, stateful_accessor<int>> mds1(arr, map, acc);
+            static_assert(mds1.data() == arr);
+            static_assert(mds1.extents() == extents<2, 3>{});
+            static_assert(mds1.mapping() == map);
+            static_assert(mds1.accessor().i == 1);
+
+            static_assert(!is_constructible_v < mdspan<int, extents<dynamic_extent>, layout_right, Pathological::Accessor>,
+                int*, extents<dynamic_extent>>); // Pathological::Accessor not default constructible
+        }
+
+        TEST_METHOD(assign)
+        {
+            int arr[6] = {};
+            mdspan<int, extents<dynamic_extent>> mds1(arr, 2);
+            mdspan<int, extents<dynamic_extent>> mds2(nullptr, 3);
+            mds2 = mds1;
+            Assert::IsTrue(mds2.data() == arr);
+            Assert::IsTrue(mds2.extents() == extents<2>{});
+            Assert::IsTrue(mds2.mapping() == mds1.mapping());
+        }
+
+        TEST_METHOD(observers)
+        {
+            using E = extents<dynamic_extent, 3>;
+            constexpr int arr[] = {0, 1, 2, 3, 4, 5, 6, 7};
+            constexpr mdspan<const int, E, layout_stride> mds{arr, layout_stride::mapping<E>{E{2}, array<size_t, 2>{1, 3}}};
+
+            static_assert(mds.rank() == 2);
+            static_assert(mds.rank_dynamic() == 1);
+
+            static_assert(mds.static_extent(0) == dynamic_extent);
+            static_assert(mds.static_extent(1) == 3);
+            static_assert(mds.extent(0) == 2);
+            static_assert(mds.extent(1) == 3);
+            static_assert(mds.size() == 6);
+
+            static_assert(mds.stride(0) == 1);
+            static_assert(mds.stride(1) == 3);
+
+            static_assert(mds.is_always_unique());
+            static_assert(!mds.is_always_contiguous());
+            static_assert(mds.is_always_strided());
+
+            static_assert(mds.is_unique());
+            static_assert(!mds.is_contiguous());
+            static_assert(mds.is_strided());
+
+            static_assert(mds(1, 0) == 1);
+            static_assert(mds(1, 2) == 7);
+
+            static_assert(mds[array{0, 1}] == 3);
+            static_assert(mds[array{1, 1}] == 4);
         }
     };
 } // namespace mdspan
