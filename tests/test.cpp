@@ -1,3 +1,6 @@
+# Copyright(c) Matt Stephanson.
+# SPDX - License - Identifier: Apache - 2.0 WITH LLVM - exception
+
 #include <gtest/gtest.h>
 #include "mdspan.h"
 #include <type_traits>

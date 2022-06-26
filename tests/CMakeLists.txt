@@ -1,3 +1,6 @@
+# Copyright (c) Matt Stephanson.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 add_subdirectory("${PROJECT_SOURCE_DIR}/../googletest" "googletest")
 
 add_executable(mdspan_test test.cpp)
