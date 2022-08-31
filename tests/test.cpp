@@ -118,6 +118,18 @@ TEST(extent_tests, copy_ctor_other) {
     static_assert(!is_constructible_v<extents<size_t, 2, 3>, extents<size_t, 2>>);
     static_assert(!is_constructible_v<extents<size_t, 2, 3>, extents<size_t, 3, 2>>);
 
+    static_assert(is_constructible_v<extents<size_t, 2, 3>, extents<size_t, 2, dynamic_extent>>);
+    static_assert(is_constructible_v<extents<size_t, 2, dynamic_extent>, extents<size_t, 2, 3>>);
+
+    static_assert(!is_convertible_v<extents<size_t, 2, dynamic_extent>, extents<size_t, 2, 3>>);
+    static_assert(is_convertible_v<extents<size_t, 2, 3>, extents<size_t, 2, dynamic_extent>>);
+
+    static_assert(is_convertible_v<extents<uint32_t, dynamic_extent>, extents<uint64_t, dynamic_extent>>);
+    static_assert(!is_convertible_v<extents<uint64_t, dynamic_extent>, extents<uint32_t, dynamic_extent>>);
+
+    extents<size_t, 2, dynamic_extent> e_dyn(3);
+    extents<size_t, 2, 3> e (e_dyn);
+
     using E = extents<size_t, 2, 3>;
 
     extents<size_t, 2, 3> e0{ extents<size_t, 2, 3>{} };
@@ -279,10 +291,12 @@ TEST(layout_left_tests, copy_ctor) {
 }
 
 TEST(layout_left_tests, copy_ctor_other) {
-    constexpr extents<size_t, 2, 3> e1;
-    constexpr extents<size_t, 2, dynamic_extent> e2{ 3 };
-    constexpr layout_left::mapping<decltype(e1)> m1(e2);
-    constexpr layout_left::mapping<decltype(e2)> m2(e1);
+    using E1 = extents<size_t, 2, 3>;
+    using E2 = extents<size_t, 2, dynamic_extent>;
+    constexpr E1 e1;
+    constexpr E2 e2{ 3 };
+    constexpr layout_left::mapping<E1> m1(static_cast<E1>(e2));
+    constexpr layout_left::mapping<E2> m2(e1);
 
     static_assert(m1.extents() == e1);
     static_assert(m2.extents() == e1);
@@ -371,10 +385,12 @@ TEST(layout_right_tests, copy_ctor) {
 }
 
 TEST(layout_right_tests, copy_ctor_other) {
-    constexpr extents<size_t, 2, 3> e1;
-    constexpr extents<size_t, 2, dynamic_extent> e2{ 3 };
-    constexpr layout_right::mapping<decltype(e1)> m1(e2);
-    constexpr layout_right::mapping<decltype(e2)> m2(e1);
+    using E1 = extents<size_t, 2, 3>;
+    using E2 = extents<size_t, 2, dynamic_extent>;
+    constexpr E1 e1;
+    constexpr E2 e2{ 3 };
+    constexpr layout_right::mapping<E1> m1(static_cast<E1>(e2));
+    constexpr layout_right::mapping<E2> m2(e1);
 
     static_assert(m1.extents() == e1);
     static_assert(m2.extents() == e1);
