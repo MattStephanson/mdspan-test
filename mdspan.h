@@ -13,8 +13,34 @@ namespace std {
     struct _Mdspan_extent_type {
         using size_type = _SizeType;
 
-        size_type _Dynamic_extents[_Rank_dynamic] = {};
+        size_type _Dynamic_extents[_Rank_dynamic];
         static constexpr size_t _Static_extents[sizeof...(_Extents)] = { _Extents... };
+
+        constexpr _Mdspan_extent_type() noexcept = default;
+
+        template <class... _OtherSizeTypes, enable_if_t<sizeof...(_OtherSizeTypes) == _Rank_dynamic
+            && (is_same_v<_OtherSizeTypes, size_type> && ...), int> = 0>
+        constexpr _Mdspan_extent_type(_OtherSizeTypes... _OtherExtents) noexcept
+            : _Dynamic_extents{ _OtherExtents... } {}
+
+        template <class _OtherSizeType, size_t _Size, size_t..._Idx, enable_if_t<_Size == _Rank_dynamic, int> = 0>
+        constexpr _Mdspan_extent_type(span<_OtherSizeType, _Size> _Data, std::index_sequence<_Idx...>) noexcept
+            : _Dynamic_extents{ static_cast<size_type>(_STD as_const(_Data[_Idx]))... }
+        {}
+
+
+        template <class... _OtherSizeTypes, enable_if_t<sizeof...(_OtherSizeTypes) == sizeof...(_Extents)
+            && sizeof...(_Extents) != _Rank_dynamic && (is_same_v<_OtherSizeTypes, size_type> && ...), int> = 0>
+        constexpr _Mdspan_extent_type(_OtherSizeTypes... _OtherExtents) noexcept {
+            auto _It = _Dynamic_extents;
+            ((_Extents == dynamic_extent ? void(*_It++ = _OtherExtents) : void(_OtherExtents)), ...);
+        }
+
+        template <class _OtherSizeType, size_t _Size, size_t..._Idx, enable_if_t<_Size == sizeof...(_Extents)
+            && sizeof...(_Extents) != _Rank_dynamic, int> = 0>
+        constexpr _Mdspan_extent_type(span<_OtherSizeType,_Size> _Data, std::index_sequence<_Idx...>) noexcept
+            : _Dynamic_extents({ static_cast<size_type>(_Data[extents<_Extents>::_Dynamic_index(_Idx)])...})
+        {}
 
         constexpr size_type* _Begin_dynamic_extents() noexcept {
             return _Dynamic_extents;
@@ -30,6 +56,12 @@ namespace std {
         using size_type = _SizeType;
 
         static constexpr size_t _Static_extents[sizeof...(_Extents)] = { _Extents... };
+
+        constexpr _Mdspan_extent_type() noexcept = default;
+
+        template <class... _SizeTypes, enable_if_t<sizeof...(_SizeTypes) == sizeof...(_Extents), int> = 0>
+        constexpr _Mdspan_extent_type(_SizeTypes... /*_OtherExtents*/) noexcept
+             {}
 
         constexpr size_type* _Begin_dynamic_extents() noexcept {
             return nullptr;
@@ -60,6 +92,11 @@ namespace std {
         using size_type = _Mybase::size_type;
         using rank_type = size_t;
 
+        static_assert(_Is_any_of_v<remove_cv_t<_SizeType>, signed char, unsigned char, short, unsigned short, int,
+            unsigned int, long, unsigned long, long long, unsigned long long>, "NXXXX [mdspan.extents.overview]/2 requires that extents::size_type be a standard integer type.");
+
+        static_assert(((_Extents == dynamic_extent || _Extents <= (numeric_limits<_SizeType>::max)()) && ...));
+
         // [mdspan.extents.obs], Observers of the domain multidimensional index space
         _NODISCARD static constexpr rank_type rank() noexcept {
             return sizeof...(_Extents);
@@ -75,7 +112,7 @@ namespace std {
 
         _NODISCARD constexpr size_type extent(const rank_type _Idx) const noexcept {
             if constexpr (rank_dynamic() == 0) {
-                return _Mybase::_Static_extents[_Idx];
+                return static_cast<size_type>(_Mybase::_Static_extents[_Idx]);
             }
             else if constexpr (rank_dynamic() == rank()) {
                 return _Mybase::_Dynamic_extents[_Idx];
@@ -91,7 +128,7 @@ namespace std {
             }
         }
 
-        // [mdspan.extents.cons], Constructors and assignment
+        // [mdspan.extents.cons], Constructors
         constexpr extents() noexcept = default;
 
         template <class _OtherSizeType, size_t... _OtherExtents,
@@ -102,7 +139,7 @@ namespace std {
             int> = 0>
         explicit((((_Extents != dynamic_extent) && (_OtherExtents == dynamic_extent)) || ...)
             || numeric_limits<size_type>::max() < numeric_limits<_OtherSizeType>::max())
-        constexpr extents(const extents<_OtherSizeType, _OtherExtents...>& _Other) noexcept {
+            constexpr extents(const extents<_OtherSizeType, _OtherExtents...>& _Other) noexcept {
             auto _Dynamic_it = _Mybase::_Begin_dynamic_extents();
             for (size_t _Dim = 0; _Dim < sizeof...(_Extents); ++_Dim) {
                 _STL_VERIFY(_Mybase::_Static_extents[_Dim] == dynamic_extent || _Mybase::_Static_extents[_Dim] == _Other.extent(_Dim),
@@ -113,61 +150,56 @@ namespace std {
             }
         }
 
-        template <class _OtherSizeType, size_t... _OtherExtents,
-            enable_if_t<sizeof...(_OtherExtents) == extents::rank()
-            && ((_OtherExtents == dynamic_extent || _Extents == dynamic_extent
-                || _OtherExtents == _Extents)
-                && ...),
+        template <class... _OtherSizeTypes,
+            enable_if_t<(is_convertible_v<_OtherSizeTypes, size_type> && ...)
+            && (is_nothrow_constructible_v<size_type, _OtherSizeTypes> && ...)
+            && (sizeof...(_OtherSizeTypes) == rank_dynamic() || sizeof...(_OtherSizeTypes) == rank()),
             int> = 0>
-        constexpr extents& operator=(const extents<_OtherSizeType, _OtherExtents...>& _Other) noexcept {
-            auto _Dynamic_it = _Mybase::_Begin_dynamic_extents();
-            for (size_t _Dim = 0; _Dim < sizeof...(_Extents); ++_Dim) {
-                _STL_VERIFY(_Mybase::_Static_extents[_Dim] == dynamic_extent || _Mybase::_Static_extents[_Dim] == _Other.extent(_Dim),
-                    "Cannot assign an extent to another extent with different rank sizes.");
-                if (_Mybase::_Static_extents[_Dim] == dynamic_extent) {
-                    *_Dynamic_it++ = _Other.extent(_Dim);
-                }
-            }
+        explicit constexpr extents(_OtherSizeTypes... _Exts) noexcept : _Mybase{ static_cast<size_type>(_Exts)... } {}
 
-            return *this;
-        }
+        template <class _OtherSizeType, size_t _Size,
+            enable_if_t<is_convertible_v<const _OtherSizeType &, size_type>
+                && is_nothrow_constructible_v<size_type, const _OtherSizeType&>
+                && (_Size == rank_dynamic() || _Size == rank()), int > = 0>
+            explicit(_Size != rank_dynamic())
+            constexpr extents(const array<_OtherSizeType, _Size>& _Exts) noexcept
+                : _Mybase{ span{_Exts}, _STD make_index_sequence<rank_dynamic()>{}} {}
 
-        template <class... _SizeTypes,
-            enable_if_t<((is_convertible_v<_SizeTypes, size_type>) &&...) && (sizeof...(_SizeTypes) == rank_dynamic()),
-            int> = 0>
-        explicit constexpr extents(_SizeTypes... _Dynamic) noexcept : _Mybase{ static_cast<size_type>(_Dynamic)... } {}
+            template <class _OtherSizeType, size_t _Size,
+                enable_if_t<is_convertible_v<const _OtherSizeType&, size_type>
+                && is_nothrow_constructible_v<size_type, const _OtherSizeType&>
+                && (_Size == rank_dynamic() || _Size == rank()), int > = 0>
+            explicit(_Size != rank_dynamic())
+                constexpr extents(span<_OtherSizeType, _Size> _Exts) noexcept
+                : _Mybase{ _Exts, _STD make_index_sequence<rank_dynamic()>{} } {}
 
-        template <class _SizeType, size_t _Size,
-            enable_if_t<is_convertible_v<_SizeType, size_type>&& _Size == extents::rank()
-            && extents::rank_dynamic() < extents::rank(),
-            int > = 0>
-            // explicit(_Size != extents::rank_dynamic())
-            constexpr extents(const array<_SizeType, _Size>& _Dynamic) noexcept {
-            auto _It = _Mybase::_Begin_dynamic_extents();
+            
+            //{
+            //    auto _It = _Mybase::_Begin_dynamic_extents();
 
-            size_t _Dim = 0;
-            ((_Extents == dynamic_extent ? void(*_It++ = _Dynamic[_Dim++]) : void(++_Dim)), ...);
+            //    size_t _Dim = 0;
+            //    ((_Extents == dynamic_extent ? void(*_It++ = _Dynamic[_Dim++]) : void(++_Dim)), ...);
 
-            // for (size_t _Dim = 0; _Dim < sizeof...(_Extents); ++_Dim) {
-            //    if (_Static_extents[_Dim] == dynamic_extent) {
-            //        *_It++ = _Dynamic[_Dim];
-            //    }
+            //    // for (size_t _Dim = 0; _Dim < sizeof...(_Extents); ++_Dim) {
+            //    //    if (_Static_extents[_Dim] == dynamic_extent) {
+            //    //        *_It++ = _Dynamic[_Dim];
+            //    //    }
+            //    //}
             //}
-        }
 
-        template <class _SizeType, size_t _Size,
-            enable_if_t<is_convertible_v<_SizeType, size_t>&& _Size == extents::rank_dynamic(), int> = 0>
-        // explicit(_Size != extents::rank_dynamic())
-        constexpr extents(const array<_SizeType, _Size>& _Dynamic) noexcept {
-            auto _It = _Mybase::_Begin_dynamic_extents();
-            for (const auto _Ext : _Dynamic) {
-                *_It++ = _Ext;
-            }
-        }
+        //template <class _SizeType, size_t _Size,
+        //    enable_if_t<is_convertible_v<_SizeType, size_t>&& _Size == extents::rank_dynamic(), int> = 0>
+        //// explicit(_Size != extents::rank_dynamic())
+        //constexpr extents(const array<_SizeType, _Size>& _Dynamic) noexcept {
+        //    auto _It = _Mybase::_Begin_dynamic_extents();
+        //    for (const auto _Ext : _Dynamic) {
+        //        *_It++ = _Ext;
+        //    }
+        //}
 
         // [mdspan.extents.compare], extents comparison operators
         template <class _OtherSizeType, size_t... _OtherExtents>
-        _NODISCARD friend constexpr bool operator==(
+        _NODISCARD_FRIEND constexpr bool operator==(
             const extents& _Lhs, const extents<_OtherSizeType, _OtherExtents...>& _Rhs) noexcept {
             if constexpr (sizeof...(_Extents) != sizeof...(_OtherExtents)) {
                 return false;
@@ -189,17 +221,22 @@ namespace std {
                     *_Out++ = *_Dynamic_it++;
                 }
                 else {
-                    *_Out++ = _Mybase::_Static_extents[_Dim];
+                    *_Out++ = static_cast<size_type>(_Mybase::_Static_extents[_Dim]);
                 }
             }
         }
 
-    private:
+    public:
         static constexpr rank_type _Dynamic_index(const rank_type _Idx) noexcept {
+            if (_Idx == 0) {
+                return 0;
+            }
+
             rank_type _Result = 0;
             rank_type _Dim = 0;
 
-            (((_Result += (_Dim < _Idx && _Extents == dynamic_extent)), (void)++_Dim), ...);
+            (((_Result += _Extents == dynamic_extent), ++_Dim < _Idx) && ...);
+            //(((_Result += (_Dim < _Idx && _Extents == dynamic_extent)), (void)++_Dim), ...);
 
             return _Result;
         }
@@ -437,7 +474,7 @@ namespace std {
             constexpr mapping(mapping&&) noexcept = default;
 
             template <class _SizeType, size_t N,
-                enable_if_t<is_convertible_v<_SizeType, size_type>&& N == extents_type::rank(), int> = 0>
+                enable_if_t<is_convertible_v<_SizeType, size_type> && N == extents_type::rank(), int> = 0>
             constexpr mapping(const _Extents& _E_, const array<_SizeType, N>& _S_) noexcept
                 : _Myext{ _E_ }, _Mystrides{ _S_ } {};
 
@@ -474,7 +511,7 @@ namespace std {
 
             _NODISCARD constexpr size_type required_span_size() const noexcept {
                 if (_Extents::rank() > 0 /*&& _Myext._All_positive()*/) {
-                    size_t _Result = 1;
+                    size_type _Result = 1;
                     for (size_t _Dim = 0; _Dim < _Extents::rank(); ++_Dim) {
                         _Result += (_Myext.extent(_Dim) - 1) * _Mystrides[_Dim];
                     }
@@ -511,14 +548,23 @@ namespace std {
 
             _NODISCARD constexpr bool is_contiguous() const noexcept {
                 // Look for a permutation of the ranks such that the partial products of the extents equal the strides.
+                // The stride of a singleton dimention doesn't matter because its index can only be zero, so they can
+                // be ignored.
                 size_type _My_extents[_Extents::rank()];
                 _Myext._Fill_extents(_My_extents);
 
-                size_type _Target = 1;
+                size_t _Singleton_count = 0;
                 for (size_t _Dim = 0; _Dim < _Extents::rank(); ++_Dim) {
+                    if (_My_extents[_Dim] == 1) {
+                        ++_Singleton_count;
+                    }
+                }
+
+                size_type _Target = 1;
+                for (size_t _Dim = _Singleton_count; _Dim < _Extents::rank(); ++_Dim) {
                     size_t _Idx = 0;
                     for (; _Idx < _Extents::rank(); ++_Idx) {
-                        if (_Mystrides[_Idx] == _Target) {
+                        if (_My_extents[_Idx] != 1 && _Mystrides[_Idx] == _Target) {
                             _Target *= _My_extents[_Idx];
                             break;
                         }

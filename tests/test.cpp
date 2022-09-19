@@ -18,6 +18,7 @@ template <class T>
 inline constexpr bool is_semiregular_trivial_nothrow_v = is_semiregular_trivial_nothrow<T>::value;
 
 TEST(extent_tests, traits) {
+    static_assert(is_semiregular_trivial_nothrow_v<extents<size_t>>);
     static_assert(is_semiregular_trivial_nothrow_v<extents<size_t, 2, 3>>);
     static_assert(is_semiregular_trivial_nothrow_v<extents<size_t, dynamic_extent, 3>>);
     static_assert(is_semiregular_trivial_nothrow_v<extents<size_t, 2, dynamic_extent>>);
@@ -25,6 +26,19 @@ TEST(extent_tests, traits) {
 
     static_assert(is_same_v<dextents<size_t, 1>, extents<size_t, dynamic_extent>>);
     static_assert(is_same_v<dextents<size_t, 2>, extents<size_t, dynamic_extent, dynamic_extent>>);
+    static_assert(is_same_v<dextents<short, 1>, extents<short, dynamic_extent>>);
+    static_assert(is_same_v<dextents<short, 2>, extents<short, dynamic_extent, dynamic_extent>>);
+
+    extents<signed char>();
+    extents<unsigned char>();
+    extents<short>();
+    extents<unsigned short>();
+    extents<int>();
+    extents<unsigned int>();
+    extents<long>();
+    extents<unsigned long>();
+    extents<long long>();
+    extents<unsigned long long>();
 }
 
 TEST(extent_tests, rank) {
@@ -80,50 +94,69 @@ TEST(extent_tests, extent) {
     static_assert(e_2dd.extent(2) == 5);
 }
 
-TEST(extent_tests, copy_ctor_sizes) {
-    static_assert(!is_constructible_v<extents<size_t, dynamic_extent>, int*>);
+struct Constructible {
+    // noexcept constructible for int, but not convertible
+    explicit operator int() noexcept;
+};
+
+struct Convertible {
+    // convertible, but not noexcept constructible
+    operator int();
+};
+
+struct ConstructibleAndConvertible {
+    // convertible and noexcept constuctible
+    operator int() noexcept;
+};
+
+struct ConstructibleAndConvertibleConst {
+    // convertible and noexcept constuctible
+    operator int() const noexcept;
+};
+
+TEST(extent_tests, ctor_other_sizes) {
+    static_assert(!is_constructible_v<extents<int, 2>, Constructible>);
+    static_assert(!is_constructible_v<extents<int, 2>, Convertible>);
+    static_assert(is_constructible_v<extents<int, 2>, ConstructibleAndConvertible>);
+    static_assert(is_constructible_v<extents<int, 2>, ConstructibleAndConvertibleConst>);
+
+    static_assert(is_constructible_v<extents<int, dynamic_extent, 2, 2>, int>);
+    static_assert(!is_constructible_v<extents<int, dynamic_extent, 2, 2>, int, int>);
+    static_assert(is_constructible_v<extents<int, dynamic_extent, 2, 2>, int, int, int>);
+
 
     extents<size_t, 2, 3> e0;
-    EXPECT_EQ(e0.extent(0), 2u);
-    EXPECT_EQ(e0.extent(1), 3u);
+    EXPECT_EQ(e0.extent(0), 2);
+    EXPECT_EQ(e0.extent(1), 3);
 
-    extents<size_t, 2, dynamic_extent> e1(5u);
-    EXPECT_EQ(e1.extent(0), 2u);
-    EXPECT_EQ(e1.extent(1), 5u);
+    extents<size_t, 2, dynamic_extent> e1(5);
+    EXPECT_EQ(e1.extent(0), 2);
+    EXPECT_EQ(e1.extent(1), 5);
 
-    extents<size_t, dynamic_extent, 3> e2(5u);
-    EXPECT_EQ(e2.extent(0), 5u);
-    EXPECT_EQ(e2.extent(1), 3u);
+    extents<size_t, dynamic_extent, 3> e2(5);
+    EXPECT_EQ(e2.extent(0), 5);
+    EXPECT_EQ(e2.extent(1), 3);
 
-    extents<size_t, dynamic_extent, dynamic_extent> e3(5u, 7u);
-    EXPECT_EQ(e3.extent(0), 5u);
-    EXPECT_EQ(e3.extent(1), 7u);
-
-    // convertible size type
-    extents<size_t, 2, dynamic_extent> e4(5);
-    EXPECT_EQ(e4.extent(0), 2u);
-    EXPECT_EQ(e4.extent(1), 5u);
-
-    extents<size_t, dynamic_extent, 3> e5(5);
-    EXPECT_EQ(e5.extent(0), 5u);
-    EXPECT_EQ(e5.extent(1), 3u);
-
-    extents<size_t, dynamic_extent, dynamic_extent> e6(5, 7);
-    EXPECT_EQ(e6.extent(0), 5u);
-    EXPECT_EQ(e6.extent(1), 7u);
+    extents<size_t, dynamic_extent, dynamic_extent> e3(5, 7);
+    EXPECT_EQ(e3.extent(0), 5);
+    EXPECT_EQ(e3.extent(1), 7);
 }
 
 TEST(extent_tests, copy_ctor_other) {
+    // Rank and value of static extents must match.
     static_assert(!is_constructible_v<extents<size_t, 2>, extents<size_t, 2, 3>>);
     static_assert(!is_constructible_v<extents<size_t, 2, 3>, extents<size_t, 2>>);
     static_assert(!is_constructible_v<extents<size_t, 2, 3>, extents<size_t, 3, 2>>);
 
+    // Static extents are constuctible, but not convertible, from dynamic extents.
     static_assert(is_constructible_v<extents<size_t, 2, 3>, extents<size_t, 2, dynamic_extent>>);
-    static_assert(is_constructible_v<extents<size_t, 2, dynamic_extent>, extents<size_t, 2, 3>>);
-
     static_assert(!is_convertible_v<extents<size_t, 2, dynamic_extent>, extents<size_t, 2, 3>>);
+
+    // Dynamic extents are constuctible and convertible from static extents.
+    static_assert(is_constructible_v<extents<size_t, 2, dynamic_extent>, extents<size_t, 2, 3>>);
     static_assert(is_convertible_v<extents<size_t, 2, 3>, extents<size_t, 2, dynamic_extent>>);
 
+    // Can implicitly convert from narrower to wider size_type, but not vice-versa.
     static_assert(is_convertible_v<extents<uint32_t, dynamic_extent>, extents<uint64_t, dynamic_extent>>);
     static_assert(!is_convertible_v<extents<uint64_t, dynamic_extent>, extents<uint32_t, dynamic_extent>>);
 
@@ -138,50 +171,91 @@ TEST(extent_tests, copy_ctor_other) {
     extents<size_t, 2, 3> e3{ extents<size_t, dynamic_extent, dynamic_extent>{2u, 3u} };
 }
 
-TEST(extent_tests, copy_ctor_array) {
-    static_assert(!is_constructible_v<extents<size_t, dynamic_extent>, array<int*, 1>&>);
+TEST(extent_tests, ctor_array) {
+    static_assert(!is_constructible_v<extents<int, 2>, array<Constructible, 1>>);
+    static_assert(!is_constructible_v<extents<int, 2>, array<Convertible, 1>>);
+    static_assert(!is_constructible_v<extents<int, 2>, array<ConstructibleAndConvertible, 1>>);
+    static_assert(is_constructible_v<extents<int, 2>, array<ConstructibleAndConvertibleConst, 1>>);
+
+    static_assert(is_constructible_v<extents<int, dynamic_extent, 2, 2>, array<int, 1>>);
+    static_assert(!is_constructible_v<extents<int, dynamic_extent, 2, 2>, array<int, 2>>);
+    static_assert(is_constructible_v<extents<int, dynamic_extent, 2, 2>, array<int, 3>>);
 
     extents<size_t, 2, 3> e0;
     EXPECT_EQ(e0.extent(0), 2u);
     EXPECT_EQ(e0.extent(1), 3u);
 
     // native extent::size_type
-    extents<size_t, 2, dynamic_extent> e1(array<size_t, 1>{5});
+    extents<size_t, 2, dynamic_extent> e1(to_array<size_t>({ 5 }));
     EXPECT_EQ(e1.extent(0), 2u);
     EXPECT_EQ(e1.extent(1), 5u);
 
-    extents<size_t, dynamic_extent, 3> e2(array<size_t, 1>{5});
+    extents<size_t, dynamic_extent, 3> e2(to_array<size_t>({ 5 }));
     EXPECT_EQ(e2.extent(0), 5u);
     EXPECT_EQ(e2.extent(1), 3u);
 
-    extents<size_t, dynamic_extent, dynamic_extent> e3(array<size_t, 2>{5, 7});
+    extents<size_t, dynamic_extent, dynamic_extent> e3(to_array<size_t>({ 5, 7 }));
     EXPECT_EQ(e3.extent(0), 5u);
     EXPECT_EQ(e3.extent(1), 7u);
 
     // convertible size type
-    extents<size_t, 2, dynamic_extent> e4(array{ 5 });
+    extents<size_t, 2, dynamic_extent> e4(to_array<int>({ 5 }));
     EXPECT_EQ(e4.extent(0), 2u);
     EXPECT_EQ(e4.extent(1), 5u);
 
-    extents<size_t, dynamic_extent, 3> e5(array{ 5 });
+    extents<size_t, dynamic_extent, 3> e5(to_array<int>({ 5 }));
     EXPECT_EQ(e5.extent(0), 5u);
     EXPECT_EQ(e5.extent(1), 3u);
 
-    extents<size_t, dynamic_extent, dynamic_extent> e6(array{ 5, 7 });
+    extents<size_t, dynamic_extent, dynamic_extent> e6(to_array<int>({ 5, 7 }));
     EXPECT_EQ(e6.extent(0), 5u);
     EXPECT_EQ(e6.extent(1), 7u);
 }
 
-TEST(extent_tests, assign) {
-    static_assert(!is_assignable_v<extents<size_t, 2>, extents<size_t, 2, 3>>);
-    static_assert(!is_assignable_v<extents<size_t, 2, 3>, extents<size_t, 2>>);
-    static_assert(!is_assignable_v<extents<size_t, 2, 3>, extents<size_t, 3, 2>>);
+TEST(extent_tests, ctor_span) {
+    static_assert(!is_constructible_v<extents<int, 2>, span<Constructible, 1>>);
+    static_assert(!is_constructible_v<extents<int, 2>, span<Convertible, 1>>);
+    static_assert(!is_constructible_v<extents<int, 2>, span<ConstructibleAndConvertible, 1>>);
+    static_assert(is_constructible_v<extents<int, 2>, span<ConstructibleAndConvertibleConst, 1>>);
+
+    static_assert(is_constructible_v<extents<int, dynamic_extent, 2, 2>, span<int, 1>>);
+    static_assert(!is_constructible_v<extents<int, dynamic_extent, 2, 2>, span<int, 2>>);
+    static_assert(is_constructible_v<extents<int, dynamic_extent, 2, 2>, span<int, 3>>);
+
 
     extents<size_t, 2, 3> e0;
-    e0 = extents<size_t, 2, 3>{};
-    e0 = extents<size_t, dynamic_extent, 3>{ 2u };
-    e0 = extents<size_t, 2, dynamic_extent>{ 3u };
-    e0 = extents<size_t, dynamic_extent, dynamic_extent>{ 2u, 3u };
+    EXPECT_EQ(e0.extent(0), 2u);
+    EXPECT_EQ(e0.extent(1), 3u);
+
+    // native extent::size_type
+    constexpr int one_int[] = { 5 };
+    constexpr int two_int[] = { 5,7 };
+    extents<size_t, 2, dynamic_extent> e1(span{ one_int });
+    EXPECT_EQ(e1.extent(0), 2);
+    EXPECT_EQ(e1.extent(1), 5);
+
+    extents<size_t, dynamic_extent, 3> e2(span{ one_int });
+    EXPECT_EQ(e2.extent(0), 5);
+    EXPECT_EQ(e2.extent(1), 3);
+
+    extents<size_t, dynamic_extent, dynamic_extent> e3(span{ two_int });
+    EXPECT_EQ(e3.extent(0), 5);
+    EXPECT_EQ(e3.extent(1), 7);
+
+    // convertible size type
+    constexpr size_t one_sizet[] = { 5 };
+    constexpr size_t two_sizet[] = { 5,7 };
+    extents<size_t, 2, dynamic_extent> e4(span{ one_sizet });
+    EXPECT_EQ(e4.extent(0), 2);
+    EXPECT_EQ(e4.extent(1), 5);
+
+    extents<size_t, dynamic_extent, 3> e5(span{ one_sizet });
+    EXPECT_EQ(e5.extent(0), 5);
+    EXPECT_EQ(e5.extent(1), 3);
+
+    extents<size_t, dynamic_extent, dynamic_extent> e6(span{ two_sizet });
+    EXPECT_EQ(e6.extent(0), 5);
+    EXPECT_EQ(e6.extent(1), 7);
 }
 
 TEST(extent_tests, equality) {
@@ -218,6 +292,48 @@ void TestMapping(const Mapping& map) {
             const auto idx = i * s[0] + j * s[1];
             EXPECT_EQ(map(i, j), idx);
             indices.push_back(idx);
+        }
+    }
+
+    bool is_unique = true;
+    bool is_cont = true;
+    sort(indices.begin(), indices.end());
+    for (size_t i = 1; i < indices.size(); ++i) {
+        const auto diff = indices[i] - indices[i - 1];
+        if (diff == 0) {
+            is_unique = false;
+        }
+        else if (diff != 1) {
+            is_cont = false;
+        }
+    }
+
+    EXPECT_EQ(map.is_unique(), is_unique);
+    EXPECT_EQ(map.is_contiguous(), is_cont);
+    EXPECT_EQ(map.required_span_size(), indices.back() + 1);
+}
+
+template <class Mapping, enable_if_t<Mapping::extents_type::rank() == 3, int> = 0>
+void TestMapping(const Mapping& map) {
+    array<size_t, Mapping::extents_type::rank()> s;
+    const auto& e = map.extents();
+    size_t num_entries = 1;
+    for (size_t i = 0; i < Mapping::extents_type::rank(); ++i) {
+        num_entries *= e.extent(i);
+        s[i] = map.stride(i);
+    }
+
+    vector<size_t> indices;
+    indices.reserve(num_entries);
+
+    using SizeT = Mapping::size_type;
+    for (SizeT i = 0; i < e.extent(0); ++i) {
+        for (SizeT j = 0; j < e.extent(1); ++j) {
+            for (SizeT k = 0; k < e.extent(2); ++k) {
+                const auto idx = i * s[0] + j * s[1] + k * s[2];
+                EXPECT_EQ(map(i, j, k), idx);
+                indices.push_back(idx);
+            }
         }
     }
 
@@ -324,8 +440,8 @@ TEST(layout_left_tests, strides) {
     layout_left::mapping<E> map;
     static_assert(map.stride(0) == 1);
     static_assert(map.stride(1) == 2);
-    static_assert(map.stride(2) == 6);
-    static_assert(map.stride(3) == 30);
+    static_assert(map.stride(2) == 2*3);
+    static_assert(map.stride(3) == 2*3*5);
 }
 
 TEST(layout_left_tests, indexing) {
@@ -416,8 +532,8 @@ TEST(layout_right_tests, assign) {
 TEST(layout_right_tests, strides) {
     using E = extents<size_t, 2, 3, 5, 7>;
     layout_right::mapping<E> map;
-    static_assert(map.stride(0) == 105);
-    static_assert(map.stride(1) == 35);
+    static_assert(map.stride(0) == 7*5*3);
+    static_assert(map.stride(1) == 7*5);
     static_assert(map.stride(2) == 7);
     static_assert(map.stride(3) == 1);
 }
@@ -534,6 +650,19 @@ TEST(layout_stride_tests, indexing_static) {
     TestMapping(layout_stride::mapping<E>{ E{}, array<size_t, 2>{1, 3} });
     TestMapping(layout_stride::mapping<E>{ E{}, array<size_t, 2>{4, 1} });
     TestMapping(layout_stride::mapping<E>{ E{}, array<size_t, 2>{2, 3} });
+
+    // contiguous mappins with singleton dimensions
+    using E1 = extents<int, 2, 1, 3>;
+    TestMapping(layout_stride::mapping<E1>{ E1{}, array<int, 3>{3, 1, 1} });
+    TestMapping(layout_stride::mapping<E1>{ E1{}, array<int, 3>{3, 7, 1} });
+
+    using E2 = extents<int, 2, 3, 1>;
+    TestMapping(layout_stride::mapping<E2>{ E2{}, array<int, 3>{3, 1, 1} });
+    TestMapping(layout_stride::mapping<E2>{ E2{}, array<int, 3>{3, 1, 11} });
+
+    using E3 = extents<int, 3, 2, 1>;
+    TestMapping(layout_stride::mapping<E3>{ E3{}, array<int, 3>{1, 3, 1} });
+    TestMapping(layout_stride::mapping<E3>{ E3{}, array<int, 3>{1, 3, 13} });
 }
 
 TEST(layout_stride_tests, equality) {
