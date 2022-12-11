@@ -4,30 +4,62 @@
 #include <gtest/gtest.h>
 #include "mdspan.h"
 #include <type_traits>
+#include <concepts>
 #include <vector>
 
 using namespace std;
 
 
+// A type that's regular and trivially copyable, and also maximally nothrow.
 template <class T>
-using is_semiregular_trivial_nothrow = std::conjunction<is_trivially_copyable<T>,
+using is_regular_trivial_nothrow = std::conjunction<std::bool_constant<std::regular<T>>,  is_trivially_copyable<T>,
     is_nothrow_default_constructible<T>, is_nothrow_copy_constructible<T>, is_nothrow_move_constructible<T>,
-    is_nothrow_copy_assignable<T>, is_nothrow_move_assignable<T>>;
+    is_nothrow_copy_assignable<T>, is_nothrow_move_assignable<T>, is_nothrow_swappable<T>>;
 
 template <class T>
-inline constexpr bool is_semiregular_trivial_nothrow_v = is_semiregular_trivial_nothrow<T>::value;
+inline constexpr bool is_regular_trivial_nothrow_v = is_regular_trivial_nothrow<T>::value;
+
+struct Constructible {
+    // noexcept constructible for size_t, but not convertible
+    explicit operator size_t() noexcept;
+};
+
+struct Convertible {
+    // convertible, but not noexcept constructible
+    operator size_t();
+};
+
+struct ConstructibleAndConvertible {
+    // convertible and noexcept constuctible
+    operator size_t() noexcept;
+};
+
+struct ConstructibleAndConvertibleConst {
+    // convertible and noexcept constuctible
+    operator size_t() const noexcept;
+};
 
 TEST(extent_tests, traits) {
-    static_assert(is_semiregular_trivial_nothrow_v<extents<size_t>>);
-    static_assert(is_semiregular_trivial_nothrow_v<extents<size_t, 2, 3>>);
-    static_assert(is_semiregular_trivial_nothrow_v<extents<size_t, dynamic_extent, 3>>);
-    static_assert(is_semiregular_trivial_nothrow_v<extents<size_t, 2, dynamic_extent>>);
-    static_assert(is_semiregular_trivial_nothrow_v<extents<size_t, dynamic_extent, dynamic_extent>>);
+    static_assert(is_regular_trivial_nothrow_v<extents<size_t>>); // strengthened; extents is not required to be swappable
+    static_assert(is_regular_trivial_nothrow_v<extents<size_t, 2, 3>>);
+    static_assert(is_regular_trivial_nothrow_v<extents<size_t, dynamic_extent, 3>>);
+    static_assert(is_regular_trivial_nothrow_v<extents<size_t, 2, dynamic_extent>>);
+    static_assert(is_regular_trivial_nothrow_v<extents<size_t, dynamic_extent, dynamic_extent>>);
 
     static_assert(is_same_v<dextents<size_t, 1>, extents<size_t, dynamic_extent>>);
     static_assert(is_same_v<dextents<size_t, 2>, extents<size_t, dynamic_extent, dynamic_extent>>);
     static_assert(is_same_v<dextents<short, 1>, extents<short, dynamic_extent>>);
     static_assert(is_same_v<dextents<short, 2>, extents<short, dynamic_extent, dynamic_extent>>);
+
+    constexpr extents e(2, 3);
+    static_assert(is_same_v<remove_cvref_t<decltype(e)>, dextents<size_t, 2>>);
+    static_assert(e.static_extent(0) == dynamic_extent);
+    static_assert(e.static_extent(1) == dynamic_extent);
+    static_assert(e.extent(0) == 2);
+    static_assert(e.extent(1) == 3);
+
+    static_assert(is_constructible_v<dextents<int,1>, int>);
+    static_assert(!is_constructible_v<dextents<int, 1>, int*>);
 
     extents<signed char>();
     extents<unsigned char>();
@@ -79,14 +111,17 @@ TEST(extent_tests, static_extent) {
 }
 
 TEST(extent_tests, extent) {
-    static_assert(extents<size_t, 2, 3>{}.extent(0) == 2);
-    static_assert(extents<size_t, 2, 3>{}.extent(1) == 3);
+    constexpr extents<size_t, 2, 3> e_23;
+    static_assert(e_23.extent(0) == 2);
+    static_assert(e_23.extent(1) == 3);
 
-    static_assert(extents<size_t, 2, dynamic_extent>{3}.extent(0) == 2);
-    static_assert(extents<size_t, 2, dynamic_extent>{3}.extent(1) == 3);
+    constexpr extents<size_t, 2, dynamic_extent> e_2d{3};
+    static_assert(e_2d.extent(0) == 2);
+    static_assert(e_2d.extent(1) == 3);
 
-    static_assert(extents<size_t, dynamic_extent, dynamic_extent>{2, 3}.extent(0) == 2);
-    static_assert(extents<size_t, dynamic_extent, dynamic_extent>{2, 3}.extent(1) == 3);
+    constexpr extents<size_t, dynamic_extent, dynamic_extent> e_dd{ 2, 3 };
+    static_assert(e_dd.extent(0) == 2);
+    static_assert(e_dd.extent(1) == 3);
 
     constexpr extents<size_t, 2, dynamic_extent, dynamic_extent> e_2dd{ 3,5 };
     static_assert(e_2dd.extent(0) == 2);
@@ -94,31 +129,11 @@ TEST(extent_tests, extent) {
     static_assert(e_2dd.extent(2) == 5);
 }
 
-struct Constructible {
-    // noexcept constructible for int, but not convertible
-    explicit operator int() noexcept;
-};
-
-struct Convertible {
-    // convertible, but not noexcept constructible
-    operator int();
-};
-
-struct ConstructibleAndConvertible {
-    // convertible and noexcept constuctible
-    operator int() noexcept;
-};
-
-struct ConstructibleAndConvertibleConst {
-    // convertible and noexcept constuctible
-    operator int() const noexcept;
-};
-
 TEST(extent_tests, ctor_other_sizes) {
-    static_assert(!is_constructible_v<extents<int, 2>, Constructible>);
-    static_assert(!is_constructible_v<extents<int, 2>, Convertible>);
-    static_assert(is_constructible_v<extents<int, 2>, ConstructibleAndConvertible>);
-    static_assert(is_constructible_v<extents<int, 2>, ConstructibleAndConvertibleConst>);
+    static_assert(!is_constructible_v<extents<size_t, 2>, Constructible>);
+    static_assert(!is_constructible_v<extents<size_t, 2>, Convertible>);
+    static_assert(is_constructible_v<extents<size_t, 2>, ConstructibleAndConvertible>);
+    static_assert(is_constructible_v<extents<size_t, 2>, ConstructibleAndConvertibleConst>);
 
     static_assert(is_constructible_v<extents<int, dynamic_extent, 2, 2>, int>);
     static_assert(!is_constructible_v<extents<int, dynamic_extent, 2, 2>, int, int>);
@@ -172,10 +187,10 @@ TEST(extent_tests, copy_ctor_other) {
 }
 
 TEST(extent_tests, ctor_array) {
-    static_assert(!is_constructible_v<extents<int, 2>, array<Constructible, 1>>);
-    static_assert(!is_constructible_v<extents<int, 2>, array<Convertible, 1>>);
-    static_assert(!is_constructible_v<extents<int, 2>, array<ConstructibleAndConvertible, 1>>);
-    static_assert(is_constructible_v<extents<int, 2>, array<ConstructibleAndConvertibleConst, 1>>);
+    static_assert(!is_constructible_v<extents<size_t, 2>, array<Constructible, 1>>);
+    static_assert(!is_constructible_v<extents<size_t, 2>, array<Convertible, 1>>);
+    static_assert(!is_constructible_v<extents<size_t, 2>, array<ConstructibleAndConvertible, 1>>);
+    static_assert(is_constructible_v<extents<size_t, 2>, array<ConstructibleAndConvertibleConst, 1>>);
 
     static_assert(is_constructible_v<extents<int, dynamic_extent, 2, 2>, array<int, 1>>);
     static_assert(!is_constructible_v<extents<int, dynamic_extent, 2, 2>, array<int, 2>>);
@@ -213,10 +228,10 @@ TEST(extent_tests, ctor_array) {
 }
 
 TEST(extent_tests, ctor_span) {
-    static_assert(!is_constructible_v<extents<int, 2>, span<Constructible, 1>>);
-    static_assert(!is_constructible_v<extents<int, 2>, span<Convertible, 1>>);
-    static_assert(!is_constructible_v<extents<int, 2>, span<ConstructibleAndConvertible, 1>>);
-    static_assert(is_constructible_v<extents<int, 2>, span<ConstructibleAndConvertibleConst, 1>>);
+    static_assert(!is_constructible_v<extents<size_t, 2>, span<Constructible, 1>>);
+    static_assert(!is_constructible_v<extents<size_t, 2>, span<Convertible, 1>>);
+    static_assert(!is_constructible_v<extents<size_t, 2>, span<ConstructibleAndConvertible, 1>>);
+    static_assert(is_constructible_v<extents<size_t, 2>, span<ConstructibleAndConvertibleConst, 1>>);
 
     static_assert(is_constructible_v<extents<int, dynamic_extent, 2, 2>, span<int, 1>>);
     static_assert(!is_constructible_v<extents<int, dynamic_extent, 2, 2>, span<int, 2>>);
@@ -309,7 +324,7 @@ void TestMapping(const Mapping& map) {
     }
 
     EXPECT_EQ(map.is_unique(), is_unique);
-    EXPECT_EQ(map.is_contiguous(), is_cont);
+    EXPECT_EQ(map.is_exhaustive(), is_cont);
     EXPECT_EQ(map.required_span_size(), indices.back() + 1);
 }
 
@@ -351,25 +366,32 @@ void TestMapping(const Mapping& map) {
     }
 
     EXPECT_EQ(map.is_unique(), is_unique);
-    EXPECT_EQ(map.is_contiguous(), is_cont);
+    EXPECT_EQ(map.is_exhaustive(), is_cont);
     EXPECT_EQ(map.required_span_size(), indices.back() + 1);
 }
 
 TEST(layout_left_tests, traits) {
-    static_assert(is_semiregular_trivial_nothrow_v<layout_left::mapping<extents<size_t, 2, 3>>>);
-    static_assert(is_semiregular_trivial_nothrow_v<layout_left::mapping<extents<size_t, dynamic_extent, 3>>>);
-    static_assert(is_semiregular_trivial_nothrow_v<layout_left::mapping<extents<size_t, 2, dynamic_extent>>>);
-    static_assert(is_semiregular_trivial_nothrow_v<layout_left::mapping<extents<size_t, dynamic_extent, dynamic_extent>>>);
+    static_assert(is_regular_trivial_nothrow_v<layout_left::mapping<extents<size_t, 2, 3>>>);
+    static_assert(is_regular_trivial_nothrow_v<layout_left::mapping<extents<size_t, dynamic_extent, 3>>>);
+    static_assert(is_regular_trivial_nothrow_v<layout_left::mapping<extents<size_t, 2, dynamic_extent>>>);
+    static_assert(is_regular_trivial_nothrow_v<layout_left::mapping<extents<size_t, dynamic_extent, dynamic_extent>>>);
+
+    using E = extents<int, 2, 3>;
+    static_assert(is_same_v<layout_left::mapping<E>::extents_type, E>);
+    static_assert(is_same_v<layout_left::mapping<E>::index_type, E::index_type>);
+    static_assert(is_same_v<layout_left::mapping<E>::size_type, E::size_type>);
+    static_assert(is_same_v<layout_left::mapping<E>::rank_type, E::rank_type>);
+    static_assert(is_same_v<layout_left::mapping<E>::layout_type, layout_left>);
 }
 
 TEST(layout_left_tests, properties) {
     constexpr layout_left::mapping<extents<size_t, 2, 3>> map{};
     static_assert(map.is_unique() == true);
-    static_assert(map.is_contiguous() == true);
+    static_assert(map.is_exhaustive() == true);
     static_assert(map.is_strided() == true);
 
     static_assert(decltype(map)::is_always_unique() == true);
-    static_assert(decltype(map)::is_always_contiguous() == true);
+    static_assert(decltype(map)::is_always_exhaustive() == true);
     static_assert(decltype(map)::is_always_strided() == true);
 }
 
@@ -406,7 +428,7 @@ TEST(layout_left_tests, copy_ctor) {
     copy_ctor_helper_left(extents<size_t, dynamic_extent, dynamic_extent>{17, 19});
 }
 
-TEST(layout_left_tests, copy_ctor_other) {
+TEST(layout_left_tests, copy_other_extent) {
     using E1 = extents<size_t, 2, 3>;
     using E2 = extents<size_t, 2, dynamic_extent>;
     constexpr E1 e1;
@@ -418,6 +440,36 @@ TEST(layout_left_tests, copy_ctor_other) {
     static_assert(m2.extents() == e1);
     static_assert(m1.extents() == e2);
     static_assert(m2.extents() == e2);
+}
+
+TEST(layout_left_tests, ctor_other_layout) {
+    using E = extents<size_t, 1>;
+
+    // from layout_left
+    using OE1 = extents<size_t, 1>;
+    static_assert(is_nothrow_constructible_v<layout_left::mapping<E>, layout_right::mapping<OE1>>);
+    static_assert(is_nothrow_convertible_v<layout_right::mapping<OE1>, layout_left::mapping<E>>);
+
+    using OE2 = extents<size_t, dynamic_extent>; // not convertible
+    static_assert(is_nothrow_constructible_v<layout_left::mapping<E>, layout_right::mapping<OE2>>);
+    static_assert(!is_convertible_v<layout_right::mapping<OE2>, layout_left::mapping<E>>);
+
+    using OE3 = extents<size_t, 1, 2>; // not constructible, rank > 1
+    static_assert(!is_constructible_v<layout_left::mapping<E>, layout_right::mapping<OE3>>);
+    static_assert(!is_convertible_v<layout_right::mapping<OE3>, layout_left::mapping<E>>);
+
+    static_assert(!is_constructible_v<layout_left::mapping<OE3>, layout_right::mapping<OE3>>);
+    static_assert(!is_convertible_v<layout_right::mapping<OE3>, layout_left::mapping<OE3>>);
+
+    // from layout_stride
+    static_assert(is_constructible_v<layout_left::mapping<extents<size_t>>, layout_stride::mapping<extents<size_t>>>);
+    static_assert(is_convertible_v<layout_stride::mapping<extents<size_t>>, layout_left::mapping<extents<size_t>>>);
+
+    static_assert(is_constructible_v<layout_left::mapping<E>, layout_stride::mapping<OE1>>);
+    static_assert(!is_convertible_v<layout_stride::mapping<OE1>, layout_left::mapping<E>>);
+
+    static_assert(!is_constructible_v<layout_left::mapping<E>, layout_stride::mapping<OE3>>);
+    static_assert(!is_convertible_v<layout_stride::mapping<OE3>, layout_left::mapping<E>>);
 }
 
 template <class Extents>
@@ -450,20 +502,20 @@ TEST(layout_left_tests, indexing) {
 }
 
 TEST(layout_right_tests, traits) {
-    static_assert(is_semiregular_trivial_nothrow_v<layout_right::mapping<extents<size_t, 2, 3>>>);
-    static_assert(is_semiregular_trivial_nothrow_v<layout_right::mapping<extents<size_t, dynamic_extent, 3>>>);
-    static_assert(is_semiregular_trivial_nothrow_v<layout_right::mapping<extents<size_t, 2, dynamic_extent>>>);
-    static_assert(is_semiregular_trivial_nothrow_v<layout_right::mapping<extents<size_t, dynamic_extent, dynamic_extent>>>);
+    static_assert(is_regular_trivial_nothrow_v<layout_right::mapping<extents<size_t, 2, 3>>>);
+    static_assert(is_regular_trivial_nothrow_v<layout_right::mapping<extents<size_t, dynamic_extent, 3>>>);
+    static_assert(is_regular_trivial_nothrow_v<layout_right::mapping<extents<size_t, 2, dynamic_extent>>>);
+    static_assert(is_regular_trivial_nothrow_v<layout_right::mapping<extents<size_t, dynamic_extent, dynamic_extent>>>);
 }
 
 TEST(layout_right_tests, properties) {
     constexpr layout_right::mapping<extents<size_t, 2, 3>> map{};
     static_assert(map.is_unique() == true);
-    static_assert(map.is_contiguous() == true);
+    static_assert(map.is_exhaustive() == true);
     static_assert(map.is_strided() == true);
 
     static_assert(decltype(map)::is_always_unique() == true);
-    static_assert(decltype(map)::is_always_contiguous() == true);
+    static_assert(decltype(map)::is_always_exhaustive() == true);
     static_assert(decltype(map)::is_always_strided() == true);
 }
 
@@ -544,10 +596,10 @@ TEST(layout_right_tests, indexing_static) {
 
 
 TEST(layout_stride_tests, traits) {
-    static_assert(is_semiregular_trivial_nothrow_v<layout_stride::mapping<extents<size_t, 2, 3>>>);
-    static_assert(is_semiregular_trivial_nothrow_v<layout_stride::mapping<extents<size_t, dynamic_extent, 3>>>);
-    static_assert(is_semiregular_trivial_nothrow_v<layout_stride::mapping<extents<size_t, 2, dynamic_extent>>>);
-    static_assert(is_semiregular_trivial_nothrow_v<layout_stride::mapping<extents<size_t, dynamic_extent, dynamic_extent>>>);
+    static_assert(is_regular_trivial_nothrow_v<layout_stride::mapping<extents<size_t, 2, 3>>>);
+    static_assert(is_regular_trivial_nothrow_v<layout_stride::mapping<extents<size_t, dynamic_extent, 3>>>);
+    static_assert(is_regular_trivial_nothrow_v<layout_stride::mapping<extents<size_t, 2, dynamic_extent>>>);
+    static_assert(is_regular_trivial_nothrow_v<layout_stride::mapping<extents<size_t, dynamic_extent, dynamic_extent>>>);
 }
 
 TEST(layout_stride_tests, properties) {
@@ -556,7 +608,7 @@ TEST(layout_stride_tests, properties) {
     static_assert(map.is_strided() == true);
 
     static_assert(decltype(map)::is_always_unique() == true);
-    static_assert(decltype(map)::is_always_contiguous() == false);
+    static_assert(decltype(map)::is_always_exhaustive() == false);
     static_assert(decltype(map)::is_always_strided() == true);
 }
 
@@ -646,12 +698,12 @@ TEST(layout_stride_tests, indexing_static) {
     TestMapping(layout_stride::mapping<E>{ E{}, array<size_t, 2>{1, 2} });
     TestMapping(layout_stride::mapping<E>{ E{}, array<size_t, 2>{3, 1} });
 
-    // non-contiguous mappings
+    // non-exhaustive mappings
     TestMapping(layout_stride::mapping<E>{ E{}, array<size_t, 2>{1, 3} });
     TestMapping(layout_stride::mapping<E>{ E{}, array<size_t, 2>{4, 1} });
     TestMapping(layout_stride::mapping<E>{ E{}, array<size_t, 2>{2, 3} });
 
-    // contiguous mappins with singleton dimensions
+    // exhaustive mappings with singleton dimensions
     using E1 = extents<int, 2, 1, 3>;
     TestMapping(layout_stride::mapping<E1>{ E1{}, array<int, 3>{3, 1, 1} });
     TestMapping(layout_stride::mapping<E1>{ E1{}, array<int, 3>{3, 7, 1} });
@@ -746,7 +798,7 @@ TEST(mdspan_tests, ctor_sizes)
     constexpr mdspan<int, extents<size_t, dynamic_extent, 3>> mds1(arr, 2);
     static_assert(mds1.data() == arr);
     static_assert(mds1.extents() == extents<size_t, 2, 3>{});
-    static_assert(mds1.is_contiguous());
+    static_assert(mds1.is_exhaustive());
 
     static_assert(!is_constructible_v<mdspan<int, Pathological::Extents, Pathological::Layout>,
         int*, Pathological::Empty>); // Empty not convertible to size_type
@@ -867,11 +919,11 @@ TEST(mdspan_tests, observers)
     static_assert(mds.stride(1) == 3);
 
     static_assert(mds.is_always_unique());
-    static_assert(!mds.is_always_contiguous());
+    static_assert(!mds.is_always_exhaustive());
     static_assert(mds.is_always_strided());
 
     static_assert(mds.is_unique());
-    static_assert(!mds.is_contiguous());
+    static_assert(!mds.is_exhaustive());
     static_assert(mds.is_strided());
 
     static_assert(mds(1, 0) == 1);
